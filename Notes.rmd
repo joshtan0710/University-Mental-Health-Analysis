@@ -50,12 +50,95 @@ text_recipe <- recipe(grade~text, data = tidy_train) %>%
 
 text_prep <- text_recipe %>% prep()
 cross_validation <- vfold_cv(tidy_train, v = 10)
+
+# define workflow
 wf <- workflow() %>% 
   add_recipe(text_recipe)
 
 ```
 
 ```{r}
-
+# each row here represents a column 2400 x 1
 str(bake(text_prep, tidy_train), list.len = 15)
 ```
+
+### Defining Lasso Model
+
+run parallelisation for tuning!
+
+```{r}
+doParallel::registerDoParallel()
+
+lasso_model <- linear_reg(penalty = tune(), mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet")
+
+lasso_grid <- grid_regular(penalty(), levels = 10)
+
+lasso_tune <- tune_grid(
+  wf %>% add_model(lasso_model),
+  resamples = cross_validation,
+  grid = lasso_grid
+)
+```
+
+### Understanding variable importance
+
+```{r}
+lasso_model_1 <- linear_reg(penalty = 0.1 , mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet")
+
+lasso_fit <- wf %>% 
+              add_model(lasso_model_1) %>% 
+              fit(data = tidy_train)
+lasso_fit %>% class()
+          
+lasso_fit %>% 
+  pull_workflow_fit() %>% 
+  tidy() %>% 
+  filter(estimate > 0.15) %>% 
+  mutate(term = str_remove(term, "tf_text_")) %>% 
+  arrange(-estimate)
+```
+
+```{r}
+lasso_tune %>% collect_metrics()
+```
+
+```{r}
+lasso_tune %>% 
+  collect_metrics() %>% 
+  ggplot(aes(x = penalty, y = mean)) + geom_line() + facet_wrap(~.metric, scales = "free")
+
+```
+
+### Final Workflow
+
+```{r}
+lasso_best_tune <- lasso_tune %>% select_best("rmse")
+final_lasso_model <- finalize_model(lasso_model, lasso_best_tune) 
+
+lasso_wf <- finalize_workflow(
+  wf %>% add_model(final_lasso_model),
+  lasso_best_tune
+)
+
+lasso_wf %>% 
+  fit(tidy_train) %>%
+  pull_workflow_fit() %>% 
+  tidy() %>% 
+  filter(estimate > 0.15) %>% 
+  mutate(term = str_remove(term, "tf_text_")) %>% 
+  arrange(-estimate)
+```
+
+### Final Results
+
+```{r}
+lasso_eval <- lasso_wf %>% last_fit(tidy_split)
+lasso_eval %>% collect_metrics()
+```
+
+### Final analysis on variable importance 
+
