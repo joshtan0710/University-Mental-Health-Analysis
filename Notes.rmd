@@ -1,0 +1,61 @@
+---
+output: github_document
+---
+
+# Notes
+
+### Loading libraries
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE)
+
+```
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(tidymodels)
+user_reviews <- readr::read_tsv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-05/user_reviews.tsv')
+
+```
+
+```{r}
+user_reviews %>% head()
+```
+
+### Partition Data
+
+```{r}
+set.seed(42)
+tidy_data <- user_reviews %>% select(-user_name)
+tidy_split <- initial_split(tidy_data, p = .8)
+tidy_train <- training(tidy_split)
+tidy_test <- testing(tidy_split)
+
+dim(tidy_data)
+dim(tidy_train)
+dim(tidy_test)
+```
+
+### Text pre-processing
+
+```{r}
+library(textrecipes)
+
+text_recipe <- recipe(grade~text, data = tidy_train) %>% 
+  step_tokenize(text) %>% 
+  step_stopwords(text) %>% 
+  step_tokenfilter(text, max_tokens = 500) %>% 
+  step_tf(text)
+
+text_prep <- text_recipe %>% prep()
+cross_validation <- vfold_cv(tidy_train, v = 10)
+wf <- workflow() %>% 
+  add_recipe(text_recipe)
+
+```
+
+```{r}
+
+str(bake(text_prep, tidy_train), list.len = 15)
+```
